@@ -1,6 +1,8 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
+import 'package:flutter_tts/flutter_tts.dart';
+import 'package:tflite/tflite.dart';
 
 List<CameraDescription> cameras;
 
@@ -20,6 +22,7 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
+  final FlutterTts flutterTts = FlutterTts();
   CameraImage img;
   CameraController controller;
   bool isBusy = false;
@@ -30,6 +33,14 @@ class _MyHomePageState extends State<MyHomePage> {
     loadModel();
   }
 
+  Future speak() async {
+    await flutterTts.setLanguage("en-US");
+    await flutterTts.setPitch(1);
+    await flutterTts.setVolume(0.8);
+    await flutterTts.setSpeechRate(0.5);
+    await flutterTts.speak(result);
+  }
+
   iniCamera() {
     controller = CameraController(cameras[0], ResolutionPreset.medium);
     controller.initialize().then((_) {
@@ -38,8 +49,8 @@ class _MyHomePageState extends State<MyHomePage> {
       }
       setState(() {
         controller.startImageStream((image) => {
-          if (!isBusy) {isBusy = true, img = image, startImageLabeling()}
-        });
+              if (!isBusy) {isBusy = true, img = image, startImageLabeling()}
+            });
       });
     });
   }
@@ -52,15 +63,54 @@ class _MyHomePageState extends State<MyHomePage> {
 
   //Load the model
   loadModel() async {
+    String res = await Tflite.loadModel(
+        model: "assets/mobilenet_v1_1.0_224.tflite",
+        labels: "assets/mobilenet_v1_1.0_224.txt",
+        numThreads: 1, // defaults to 1
+        isAsset:
+            true, // defaults to true, set to false to load resources outside assets
+        useGpuDelegate:
+            false // defaults to false, set to true to use GPU delegate
+        );
+    print(res);
   }
 
   //do image labeling
   startImageLabeling() async {
+    var recognitions = await Tflite.runModelOnFrame(
+        bytesList: img.planes.map((plane) {
+          return plane.bytes;
+        }).toList(), // required
+        imageHeight: img.height,
+        imageWidth: img.width,
+        imageMean: 127.5, // defaults to 127.5
+        imageStd: 127.5, // defaults to 127.5
+        rotation: 90, // defaults to 90, Android only
+        numResults: 5, // defaults to 5
+        threshold: 0.1, // defaults to 0.1
+        asynch: true // defaults to true
+        );
+    result = "";
+
+    recognitions.forEach((element) {
+      result += element["label"] +
+          "  " +
+          (element["confidence"] as double).toStringAsFixed(2) +
+          "\n";
+    });
+
+    setState(() {
+      // ignore: unnecessary_statements
+      result;
+    });
+
+    isBusy = false;
   }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      debugShowCheckedModeBanner: false,
       home: SafeArea(
         child: Scaffold(
           body: Container(
@@ -87,20 +137,21 @@ class _MyHomePageState extends State<MyHomePage> {
                           width: 310,
                           child: img == null
                               ? Container(
-                            width: 140,
-                            height: 150,
-                            child: Icon(
-                              Icons.videocam,
-                              color: Colors.white,
-                            ),
-                          )
+                                  width: 140,
+                                  height: 150,
+                                  child: Icon(
+                                    Icons.videocam,
+                                    color: Colors.white,
+                                  ),
+                                )
                               : AspectRatio(
-                            aspectRatio: controller.value.aspectRatio,
-                            child: CameraPreview(controller),
-                          ),
+                                  aspectRatio: controller.value.aspectRatio,
+                                  child: CameraPreview(controller),
+                                ),
                         ),
                         onPressed: () {
                           iniCamera();
+                          speak();
                         },
                       ),
                     ),
@@ -111,13 +162,13 @@ class _MyHomePageState extends State<MyHomePage> {
                     margin: EdgeInsets.only(top: 50),
                     child: SingleChildScrollView(
                         child: Text(
-                          '$result',
-                          style: TextStyle(
-                              fontSize: 30,
-                              color: Colors.black,
-                              fontFamily: 'finger_paint'),
-                          textAlign: TextAlign.center,
-                        )),
+                      '$result',
+                      style: TextStyle(
+                          fontSize: 30,
+                          color: Colors.black,
+                          fontFamily: 'finger_paint'),
+                      textAlign: TextAlign.center,
+                    )),
                   ),
                 ),
               ],
